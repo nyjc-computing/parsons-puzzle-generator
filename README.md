@@ -3,7 +3,7 @@
 A lightweight, browser-based tool to convert code snippets into interactive "Parsons Problems" (drag-and-drop code ordering exercises). 
 
 ## 🚀 Live Demo
-[Parsons Puzzle Generator](https://nyjc-computing.github.io/parsons-puzzle-generator/)]
+[Parsons Puzzle Generator](https://nyjc-computing.github.io/parsons-puzzle-generator/)
 
 ## ✨ Features
 * **2D Indentation:** Support for horizontal indentation (essential for Python and logic nesting).
