@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Parsons Problem Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .code-block { cursor: grab; transition: margin-left 0.2s ease-out; }
+        .code-block:active { cursor: grabbing; }
+        .no-select { user-select: none; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col p-4 md:p-8">
+
+    <header class="mb-8 text-center">
+        <h1 class="text-3xl font-bold text-gray-800 mb-2">Python Code Puzzles</h1>
+        <p class="text-gray-600">Drag the blocks to the right and order them. Use the arrow buttons to indent.</p>
+    </header>
+
+    <main class="max-w-6xl mx-auto w-full bg-white rounded-xl shadow-lg overflow-hidden flex flex-col md:flex-row min-h-[600px]">
+        
+        <div id="setupPanel" class="w-full p-8 flex flex-col gap-4">
+            <h2 class="text-xl font-semibold text-gray-700">Create New Puzzle</h2>
+            <p class="text-sm text-gray-500">Paste your correct code below. <strong>Use the TAB key to indent.</strong></p>
+            
+            <textarea id="inputCode" class="w-full h-64 p-4 font-mono text-sm bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none" 
+            placeholder="def hello_world():&#10;    if True:&#10;        print('Use Tab to indent this line')"></textarea>
+            
+            <button onclick="generatePuzzle()" class="self-end bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg transition">
+                Generate Puzzle
+            </button>
+        </div>
+
+        <div id="puzzlePanel" class="hidden w-full flex flex-col md:flex-row h-full">
+            
+            <div class="md:w-1/3 bg-gray-100 p-4 border-r border-gray-200 overflow-y-auto">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="font-semibold text-gray-700">Source Blocks</h3>
+                    <button onclick="resetPuzzle()" class="text-xs text-red-500 hover:text-red-700 underline">Reset / New</button>
+                </div>
+                <div id="sourceList" class="min-h-[400px] flex flex-col gap-2 pb-20"></div>
+            </div>
+
+            <div class="md:w-2/3 bg-white p-4 flex flex-col relative">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="font-semibold text-gray-700">Your Solution</h3>
+                    <div id="statusMessage" class="text-sm font-bold"></div>
+                </div>
+                
+                <div id="solutionList" class="flex-grow min-h-[400px] flex flex-col gap-2 border-2 border-dashed border-gray-300 rounded-lg p-4 bg-gray-50 pb-20"></div>
+
+                <div class="absolute bottom-6 right-6">
+                    <button onclick="checkAnswer()" class="shadow-lg bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-full transition transform hover:scale-105">
+                        <i class="fa-solid fa-check mr-2"></i> Check Answer
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // --- State Management ---
+        const STORAGE_KEY = 'parsons_state_v2';
+        let appState = {
+            isActive: false,
+            originalLines: [], 
+            blocks: [] 
+        };
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            loadState();
+            initSortables();
+            
+            // --- NEW: TAB KEY SUPPORT ---
+            const textarea = document.getElementById('inputCode');
+            textarea.addEventListener('keydown', function(e) {
+                if (e.key == 'Tab') {
+                    e.preventDefault();
+                    document.execCommand('insertText', false, '    ');
+                }
+            });
+        });
+
+		function initSortables() {
+			new Sortable(document.getElementById('sourceList'), {
+				group: 'shared',
+				animation: 150,
+				ghostClass: 'bg-blue-100',
+				onEnd: handleDrop // CHANGED: Call handleDrop instead of just saveState
+			});
+
+			new Sortable(document.getElementById('solutionList'), {
+				group: 'shared',
+				animation: 150,
+				ghostClass: 'bg-blue-100',
+				onEnd: handleDrop // CHANGED: Call handleDrop instead of just saveState
+			});
+		}
+
+		// Add this new function right below initSortables:
+		function handleDrop() {
+			saveState(); // 1. Save the new order to memory
+			render();    // 2. Refresh the screen (this adds the buttons!)
+		}
+
+        // --- Logic ---
+        function generatePuzzle() {
+            const rawText = document.getElementById('inputCode').value;
+            if (!rawText.trim()) return alert("Please enter some code first.");
+
+            const lines = rawText.split('\n').filter(line => line.trim() !== '');
+            
+            appState.originalLines = lines.map((line, index) => {
+                const leadingSpaces = line.search(/\S|$/);
+                const indentLevel = Math.floor(leadingSpaces / 4); 
+                return {
+                    id: 'block-' + index,
+                    code: line.trim(),
+                    requiredIndent: indentLevel
+                };
+            });
+
+            appState.blocks = appState.originalLines.map(l => ({
+                id: l.id, listId: 'source', currentIndent: 0
+            }));
+            
+            appState.blocks.sort(() => Math.random() - 0.5);
+            appState.isActive = true;
+            render();
+            saveState();
+        }
+
+        function render() {
+            const setupPanel = document.getElementById('setupPanel');
+            const puzzlePanel = document.getElementById('puzzlePanel');
+            const sourceList = document.getElementById('sourceList');
+            const solutionList = document.getElementById('solutionList');
+
+            if (!appState.isActive) {
+                setupPanel.classList.remove('hidden');
+                puzzlePanel.classList.add('hidden');
+                return;
+            }
+
+            setupPanel.classList.add('hidden');
+            puzzlePanel.classList.remove('hidden');
+            puzzlePanel.classList.add('flex');
+            sourceList.innerHTML = '';
+            solutionList.innerHTML = '';
+
+            appState.blocks.forEach(block => {
+                const original = appState.originalLines.find(l => l.id === block.id);
+                const el = createBlockElement(block, original.code);
+                if (block.listId === 'source') sourceList.appendChild(el);
+                else solutionList.appendChild(el);
+            });
+        }
+
+        function createBlockElement(blockState, text) {
+            const div = document.createElement('div');
+            div.className = 'code-block bg-white p-3 rounded shadow-sm border border-gray-200 flex items-center justify-between no-select group';
+            div.setAttribute('data-id', blockState.id);
+            
+            if (blockState.listId === 'solution') {
+                div.style.marginLeft = (blockState.currentIndent * 2) + 'rem';
+                div.classList.add('border-l-4', 'border-l-blue-400'); // Visual cue for solution items
+            }
+
+            const codeSpan = document.createElement('code');
+            codeSpan.className = 'font-mono text-sm text-gray-800 truncate mr-2 pointer-events-none';
+            codeSpan.textContent = text;
+            
+            const textContainer = document.createElement('div');
+            textContainer.className = 'flex-grow';
+            textContainer.appendChild(codeSpan);
+            div.appendChild(textContainer);
+
+            if (blockState.listId === 'solution') {
+                const controls = document.createElement('div');
+                controls.className = 'flex gap-1';
+                
+                const btnLeft = document.createElement('button');
+                btnLeft.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
+                btnLeft.className = 'w-7 h-7 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded text-xs text-gray-600 transition';
+                btnLeft.onclick = (e) => { e.stopPropagation(); updateIndent(blockState.id, -1); };
+                
+                const btnRight = document.createElement('button');
+                btnRight.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
+                btnRight.className = 'w-7 h-7 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded text-xs text-gray-600 transition';
+                btnRight.onclick = (e) => { e.stopPropagation(); updateIndent(blockState.id, 1); };
+
+                controls.appendChild(btnLeft);
+                controls.appendChild(btnRight);
+                div.appendChild(controls);
+            }
+            return div;
+        }
+
+        function updateIndent(id, change) {
+            const blockIndex = appState.blocks.findIndex(b => b.id === id);
+            if (blockIndex === -1) return;
+            let newIndent = appState.blocks[blockIndex].currentIndent + change;
+            if (newIndent < 0) newIndent = 0;
+            if (newIndent > 8) newIndent = 8; 
+            appState.blocks[blockIndex].currentIndent = newIndent;
+            saveState();
+            render();
+        }
+
+        function checkAnswer() {
+            const solutionListEl = document.getElementById('solutionList');
+            const currentIds = Array.from(solutionListEl.children).map(el => el.getAttribute('data-id'));
+
+            if (currentIds.length !== appState.originalLines.length) {
+                showStatus("Incomplete! Drag all blocks to the solution.", "text-orange-600");
+                return;
+            }
+
+            let isCorrect = true;
+            for (let i = 0; i < appState.originalLines.length; i++) {
+                const correctBlock = appState.originalLines[i];
+                const userBlockId = currentIds[i]; 
+                const userBlockState = appState.blocks.find(b => b.id === userBlockId);
+
+                if (userBlockId !== correctBlock.id || userBlockState.currentIndent !== correctBlock.requiredIndent) {
+                    isCorrect = false;
+                    break;
+                }
+            }
+
+            if (isCorrect) {
+                showStatus("Success! The code is correct.", "text-green-600");
+                document.getElementById('solutionList').classList.add('ring-4', 'ring-green-200');
+            } else {
+                showStatus("Incorrect. Check order and indentation.", "text-red-600");
+                document.getElementById('solutionList').classList.add('ring-4', 'ring-red-200');
+            }
+            setTimeout(() => { document.getElementById('solutionList').classList.remove('ring-4', 'ring-green-200', 'ring-red-200'); }, 2000);
+        }
+
+        function showStatus(msg, colorClass) {
+            const el = document.getElementById('statusMessage');
+            el.textContent = msg;
+            el.className = "text-sm font-bold " + colorClass;
+        }
+
+        function resetPuzzle() {
+            if(confirm("Start a new puzzle?")) {
+                localStorage.removeItem(STORAGE_KEY);
+                location.reload();
+            }
+        }
+
+        function saveState() {
+            if (!appState.isActive) return;
+            const sourceEls = Array.from(document.getElementById('sourceList').children);
+            const solutionEls = Array.from(document.getElementById('solutionList').children);
+
+            sourceEls.forEach(el => {
+                const b = appState.blocks.find(b => b.id === el.getAttribute('data-id'));
+                if(b) b.listId = 'source';
+            });
+            solutionEls.forEach(el => {
+                const b = appState.blocks.find(b => b.id === el.getAttribute('data-id'));
+                if(b) b.listId = 'solution';
+            });
+            
+            appState.blocks.forEach(b => {
+                 const sEl = document.querySelector(`#sourceList [data-id="${b.id}"]`);
+                 const solEl = document.querySelector(`#solutionList [data-id="${b.id}"]`);
+                 if(sEl) b.sortIndex = Array.from(sourceEls).indexOf(sEl);
+                 if(solEl) b.sortIndex = Array.from(solutionEls).indexOf(solEl);
+            });
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+        }
+
+        function loadState() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                appState = JSON.parse(saved);
+                appState.blocks.sort((a, b) => a.sortIndex - b.sortIndex);
+                render();
+            }
+        }
+    </script>
+</body>
+</html>
